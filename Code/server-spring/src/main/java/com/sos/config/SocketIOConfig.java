@@ -1,0 +1,42 @@
+package com.sos.config;
+
+import com.corundumstudio.socketio.SocketIOServer;
+import com.corundumstudio.socketio.Transport;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+// Sets up the Socket.IO server for real-time updates
+@Configuration
+public class SocketIOConfig {
+
+    @Value("${socketio.host:0.0.0.0}")
+    private String host;
+
+    @Value("${socketio.port:3002}")
+    private int port;
+
+    @Value("${cors.allowed-origin:http://localhost:5173}")
+    private String allowedOrigin;
+
+    @Bean
+    public SocketIOServer socketIOServer() {
+        com.corundumstudio.socketio.Configuration config =
+                new com.corundumstudio.socketio.Configuration();
+        config.setHostname(host);
+        config.setPort(port);
+
+        // Allow both WebSocket and polling transports
+        config.setTransports(Transport.WEBSOCKET, Transport.POLLING);
+
+        // CORS — allow the React dev server
+        config.setOrigin(allowedOrigin);
+        config.setAllowHeaders("*");
+
+        // Increase ping timeout for reliability
+        config.setPingTimeout(60000);
+        config.setPingInterval(25000);
+
+        return new SocketIOServer(config);
+    }
+}
