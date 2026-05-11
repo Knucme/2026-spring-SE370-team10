@@ -469,7 +469,7 @@ function SplitCheckModal({ tableNum, orders, total, onClose, onSplitEvenComplete
 }
 
 // ── Table detail modal ──────────────────────────────────────────────────────
-function TableModal({ tableNum, orders, onClose, onAddFood, onCheckout, onSplitEvenCheckout, onSplitByOrderCheckout, onPrintReceipt }) {
+function TableModal({ tableNum, orders, onClose, onAddFood, onCheckout, onSplitEvenCheckout, onSplitByOrderCheckout, onCancelOrder, onPrintReceipt }) {
   const allItems = orders.flatMap((o) => (o.orderItems ?? []).map((item) => ({ ...item, orderId: o.id, orderStatus: o.status })));
   const total = allItems.reduce((sum, item) => sum + (item.menuItem?.price ? Number(item.menuItem.price) * item.quantity : 0), 0);
   const hasActiveOrders = orders.some((o) => ['PENDING', 'IN_PROGRESS', 'DELAYED'].includes(o.status));
@@ -536,8 +536,13 @@ function TableModal({ tableNum, orders, onClose, onAddFood, onCheckout, onSplitE
                         </li>
                       ))}
                     </ul>
-                    <div className="text-right text-sm text-tac-muted mt-1 pt-1 border-t border-tac-border font-mono">
-                      Subtotal: ${orderTotal.toFixed(2)}
+                    <div className="flex items-center justify-between mt-1 pt-1 border-t border-tac-border">
+                      <button
+                        onClick={() => onCancelOrder(order.id)}
+                        className="text-red-400 hover:text-red-300 text-xs font-mono font-bold uppercase tracking-wider transition">
+                        CANCEL ORDER
+                      </button>
+                      <span className="text-sm text-tac-muted font-mono">Subtotal: ${orderTotal.toFixed(2)}</span>
                     </div>
                   </div>
                 );
@@ -924,6 +929,8 @@ export default function FOHDashboard() {
   const cartCount = cart.reduce((sum, c) => sum + c.quantity, 0);
 
   // ── Submit order ────────────────────────────────────────────────────────
+  const MAX_ORDERS_PER_TABLE = 5;
+
   const handleSubmit = async () => {
     if (cart.length === 0) {
       showToast('Please add at least one item before submitting.', 'error');
@@ -931,6 +938,14 @@ export default function FOHDashboard() {
     }
     if (!tableNumber) {
       showToast('Please select a valid table number.', 'error');
+      return;
+    }
+    // Cap: max 5 active orders per table
+    const tableActiveOrders = myOrders.filter(
+      (o) => o.tableNumber === parseInt(tableNumber) && ['PENDING', 'IN_PROGRESS', 'DELAYED'].includes(o.status)
+    );
+    if (tableActiveOrders.length >= MAX_ORDERS_PER_TABLE) {
+      showToast(`Table ${tableNumber} already has ${MAX_ORDERS_PER_TABLE} active orders — checkout or cancel before adding more.`, 'error', 5000);
       return;
     }
     const unavailableInCart = cart.filter((c) => {
@@ -966,6 +981,17 @@ export default function FOHDashboard() {
     setSelectedTable(null);
     setTableNumber(String(tableNum));
     setView('menu');
+  };
+
+  // ── Cancel a single order (customer changed their mind) ─────────────────
+  const handleCancelOrder = async (orderId) => {
+    try {
+      await axios.patch(`/api/orders/${orderId}/status`, { status: 'CANCELLED' });
+      setMyOrders((prev) => prev.map((o) => o.id === orderId ? { ...o, status: 'CANCELLED' } : o));
+      showToast('Order cancelled', 'success');
+    } catch {
+      showToast('Failed to cancel order', 'error');
+    }
   };
 
   const handleCheckout = async (tableNum, paymentMethod, cardLast4) => {
@@ -1166,6 +1192,7 @@ export default function FOHDashboard() {
           onCheckout={handleCheckout}
           onSplitEvenCheckout={handleSplitEvenCheckout}
           onSplitByOrderCheckout={handleSplitByOrderCheckout}
+          onCancelOrder={handleCancelOrder}
           onPrintReceipt={handlePrintReceipt}
         />
       )}
