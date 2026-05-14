@@ -9,23 +9,43 @@ import EmptyState from '../../components/EmptyState';
 import { useToast } from '../../components/useToast';
 import { ToastContainer } from '../../components/Toast';
 
-// ── Live elapsed time display ────────────────────────────────────────────────
-function TimeElapsed({ createdAt }) {
-  const [label, setLabel] = useState('');
+// ── Urgency timer — changes color as time passes ─────────────────────────────
+// PENDING orders: yellow after 3 min, red after 5 min (not yet accepted)
+// IN_PROGRESS orders: yellow after 8 min, red after 12 min (not yet sent out)
+const URGENCY_THRESHOLDS = {
+  PENDING:     { warn: 3 * 60, critical: 5 * 60 },
+  IN_PROGRESS: { warn: 8 * 60, critical: 12 * 60 },
+  DELAYED:     { warn: 5 * 60, critical: 10 * 60 },
+};
+
+function UrgencyTimer({ createdAt, status, acceptedAt }) {
+  const [elapsed, setElapsed] = useState(0);
+
+  // For IN_PROGRESS/DELAYED, timer resets from when it was accepted
+  const startTime = (status === 'IN_PROGRESS' || status === 'DELAYED') && acceptedAt
+    ? new Date(acceptedAt).getTime()
+    : new Date(createdAt).getTime();
 
   useEffect(() => {
-    const update = () => {
-      const secs = Math.floor((Date.now() - new Date(createdAt).getTime()) / 1000);
-      const m = Math.floor(secs / 60);
-      const s = secs % 60;
-      setLabel(m > 0 ? `${m}m ${s}s` : `${s}s`);
-    };
+    const update = () => setElapsed(Math.floor((Date.now() - startTime) / 1000));
     update();
     const id = setInterval(update, 1000);
     return () => clearInterval(id);
-  }, [createdAt]);
+  }, [startTime]);
 
-  return <span className="text-tac-muted text-sm font-mono tabular-nums">{label}</span>;
+  const thresholds = URGENCY_THRESHOLDS[status] ?? URGENCY_THRESHOLDS.PENDING;
+  const m = Math.floor(elapsed / 60);
+  const s = elapsed % 60;
+  const label = m > 0 ? `${m}m ${s}s` : `${s}s`;
+
+  let colorClass = 'text-tac-muted'; // normal
+  if (elapsed >= thresholds.critical) {
+    colorClass = 'text-red-400 animate-pulse font-bold';
+  } else if (elapsed >= thresholds.warn) {
+    colorClass = 'text-amber-400 font-semibold';
+  }
+
+  return <span className={`text-sm font-mono tabular-nums ${colorClass}`}>{label}</span>;
 }
 
 // ── Inline delay-minutes input ───────────────────────────────────────────────
@@ -176,7 +196,7 @@ function OrderCard({ order, onAccept, onDelay, onComplete, onDeny, onNote }) {
         <div>
           <p className="text-3xl font-black text-tac-bright leading-none font-mono">TBL {order.tableNumber}</p>
           <div className="flex items-center gap-2 mt-1">
-            <TimeElapsed createdAt={order.createdAt} />
+            <UrgencyTimer createdAt={order.createdAt} status={order.status} acceptedAt={order.acceptedAt} />
             <StatusBadge status={order.status} />
           </div>
         </div>
@@ -419,7 +439,8 @@ export default function BOHDashboard() {
     try {
       const res = await axios.patch(`/api/orders/${orderId}/status`, { status: 'IN_PROGRESS' });
       const updated = res.data.order ?? res.data;
-      setOrders((prev) => prev.map((o) => o.id === orderId ? { ...o, ...updated } : o));
+      // Track when it was accepted so the urgency timer can reset
+      setOrders((prev) => prev.map((o) => o.id === orderId ? { ...o, ...updated, acceptedAt: new Date().toISOString() } : o));
       getSocket()?.emit('order:acknowledged', { orderId });
     } catch {
       showToast('Failed to accept order', 'error');
@@ -757,10 +778,10 @@ export default function BOHDashboard() {
             )}
           </div>
 
-          {/* Alert Broadcaster (UC-04) */}
+          {/* Alert Broadcaster */}
           <div className="p-4">
             <h2 className="text-tac-green font-mono font-bold text-sm mb-3 uppercase tracking-widest">Broadcast Alert</h2>
-            {/* Quick Templates (UC-04 Ext 3a) */}
+            {/* Quick Templates */}
             <div className="flex flex-wrap gap-1.5 mb-3">
               {['86\'d — item sold out', 'Rush incoming — all hands', 'Equipment issue — stand by', 'Menu change — check board', 'VIP table — priority service'].map((tpl) => (
                 <button key={tpl} onClick={() => setAlertText(tpl)}
